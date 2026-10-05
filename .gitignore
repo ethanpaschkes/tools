@@ -1,0 +1,11 @@
+# secrets never go in this repo
+.env
+.env.*
+!.env.example
+# outputs and local state
+terrain/
+*.wav
+*.mp4
+.repo-stats.json
+__pycache__/
+.DS_Store
