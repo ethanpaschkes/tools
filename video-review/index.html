@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Video Review</title>
+<style>
+:root{color-scheme:dark;--bg:#0c0e12;--card:#171a21;--line:#2a2f3a;--text:#f1f3f7;--dim:#98a1b3;--gold:#f6c343;--green:#3ecf8e;--red:#ff6b6b;--blue:#5aa9ff}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 -apple-system,system-ui,sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+main{max-width:520px;margin:0 auto;padding:12px 16px 40px}
+h1{font-size:22px;margin:8px 0 4px}p.sub{color:var(--dim);margin:0 0 14px;font-size:14px}
+button{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:10px;min-height:44px;padding:0 12px;cursor:pointer}
+.row{display:flex;gap:8px;align-items:center}.grow{flex:1;min-width:0}
+.list button{display:flex;width:100%;text-align:left;justify-content:space-between;gap:10px;align-items:center;padding:12px;margin-bottom:8px;min-height:60px}
+.list small{color:var(--dim);display:block;font-size:13px}.tag{white-space:nowrap;color:var(--gold);font-size:14px}.tag.none{color:var(--dim)}
+.top{display:flex;align-items:center;gap:8px;margin-bottom:8px}.top .grow{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage{position:relative;background:#000;border-radius:12px;overflow:hidden;display:flex;justify-content:center}
+video{display:block;max-width:100%;height:58vh;height:58dvh;aspect-ratio:9/16}
+.big{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:56px;pointer-events:none;opacity:.85}
+.bar{position:relative;height:44px;margin-top:4px}
+.bar input{position:absolute;inset:0;width:100%;height:44px;margin:0;accent-color:var(--gold);background:none}
+.mark{position:absolute;top:2px;width:4px;height:12px;margin-left:-2px;background:var(--blue);border-radius:2px;pointer-events:none}
+.ctl{display:flex;gap:6px;align-items:center}.ctl button{flex:1;padding:0 4px}.time{min-width:92px;font-variant-numeric:tabular-nums;color:var(--dim);font-size:14px;text-align:right}
+.stars{display:flex;justify-content:space-between;margin:12px 0 8px}.stars button{flex:1;background:none;border:0;font-size:34px;color:#4a5160;padding:0;min-height:52px}.stars button.on{color:var(--gold)}
+.verdict{display:flex;gap:6px;margin-bottom:12px}.verdict button{flex:1;font-size:14px;padding:0 4px}
+.verdict .on[data-v=final]{background:var(--green);border-color:var(--green);color:#04210f;font-weight:700}
+.verdict .on[data-v=fix]{background:var(--gold);border-color:var(--gold);color:#2b2000;font-weight:700}
+.verdict .on[data-v=skip]{background:var(--red);border-color:var(--red);color:#2b0505;font-weight:700}
+.note{background:var(--card);border-radius:10px;padding:10px 12px;margin:10px 0;color:var(--dim);font-size:14px}
+textarea{width:100%;font:inherit;font-size:16px;color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px;min-height:60px;resize:vertical}
+.pin{font-size:14px;min-height:40px;white-space:nowrap}.pin.on{border-color:var(--blue);color:var(--blue)}
+.send{background:var(--blue);border-color:var(--blue);color:#04121f;font-weight:700}
+.c{display:flex;gap:8px;align-items:flex-start;border-bottom:1px solid var(--line);padding:8px 0}
+.c .when{color:var(--blue);background:none;border:0;min-height:32px;padding:0;font-variant-numeric:tabular-nums;font-size:14px;white-space:nowrap}
+.c .text{flex:1;white-space:pre-wrap;overflow-wrap:anywhere}.c .x{background:none;border:0;color:var(--dim);min-height:32px;padding:0 4px}
+.status{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(10px + env(safe-area-inset-bottom));background:var(--card);border:1px solid var(--line);border-radius:20px;padding:4px 12px;font-size:13px;color:var(--dim)}
+.status.bad{color:var(--red)}[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<div class="status" id="status" hidden></div>
+<script>
+const app = document.getElementById('app'), statusEl = document.getElementById('status');
+const el = (tag, props = {}, ...kids) => { const n = Object.assign(document.createElement(tag), props); n.append(...kids); return n; };
+const fmt = t => t == null ? 'whole clip' : `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
+const enc = encodeURIComponent;
+const QUEUE_KEY = 'video-review-queue';
+const store = { get() { try { return JSON.parse(localStorage.getItem(QUEUE_KEY)) || []; } catch { return []; } },
+                set(q) { try { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); } catch {} } };
+let queue = store.get(), sending = false;
+
+function say(text, bad) { statusEl.textContent = text; statusEl.hidden = !text; statusEl.classList.toggle('bad', !!bad); }
+async function flush() {
+  if (sending) return;
+  sending = true;
+  while (queue.length) {
+    const job = queue[0];
+    say('Saving…');
+    try {
+      const r = await fetch(`api/batch/${enc(job.batch)}/${enc(job.clip)}`, { method: 'POST', body: JSON.stringify(job.op) });
+      if (r.status >= 500) throw 0;
+    } catch { say('Not saved yet. Will retry', true); sending = false; setTimeout(flush, 4000); return; }
+    queue.shift(); store.set(queue);
+  }
+  sending = false; say('Saved'); setTimeout(() => { if (!queue.length) say(''); }, 1200);
+}
+function post(batch, clip, op) { queue.push({ batch, clip, op }); store.set(queue); flush(); }
+const getJSON = u => fetch(u).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+
+async function home() {
+  const rows = await getJSON('api/batches');
+  if (rows.length === 1) { location.hash = rows[0].name; return; }
+  app.replaceChildren(el('h1', { textContent: 'Video review' }),
+    rows.length ? el('div', { className: 'list' }, ...rows.map(b => el('button', { onclick: () => location.hash = b.name },
+      el('span', { className: 'grow', textContent: b.title }), el('span', { className: 'tag', textContent: `${b.rated}/${b.count} rated` }))))
+    : el('p', { className: 'sub', textContent: 'No batches yet.' }));
+}
+async function batch(name) {
+  const b = await getJSON(`api/batch/${enc(name)}`);
+  const rated = b.clips.filter(c => c.rating || c.verdict).length;
+  app.replaceChildren(el('h1', { textContent: b.title }), el('p', { className: 'sub', textContent: b.note || `${rated} of ${b.clips.length} rated` }),
+    el('div', { className: 'list' }, ...b.clips.map(c => el('button', { onclick: () => location.hash = `${name}/${enc(c.file)}` },
+      el('span', { className: 'grow' }, c.title, el('small', { textContent: c.comments.length ? `${c.comments.length} comment${c.comments.length > 1 ? 's' : ''}` : (c.note || '') })),
+      el('span', { className: 'tag' + (c.rating ? '' : ' none'), textContent: c.rating ? '★'.repeat(c.rating) : 'Watch' })))));
+}
+async function clip(name, file) {
+  const b = await getJSON(`api/batch/${enc(name)}`);
+  const i = b.clips.findIndex(c => c.file === file), c = b.clips[i];
+  if (!c) { location.hash = name; return; }
+  const next = b.clips[i + 1];
+  const video = el('video', { src: `v/${enc(name)}/${enc(file)}`, playsInline: true, preload: 'auto', loop: true });
+  video.setAttribute('playsinline', '');
+  const big = el('div', { className: 'big', textContent: '▶' });
+  const seek = el('input', { type: 'range', min: 0, max: 1000, value: 0, step: 1, ariaLabel: 'Position in clip' });
+  const marks = el('div');
+  const bar = el('div', { className: 'bar' }, seek, marks);
+  const time = el('span', { className: 'time', textContent: '0:00.0' });
+  const dur = () => isFinite(video.duration) ? video.duration : 0;
+  const go = t => { video.pause(); video.currentTime = Math.max(0, Math.min(dur(), t)); };
+  const toggle = () => video.paused ? video.play() : video.pause();
+  let scrubbing = false, speed = 1;
+  const speedBtn = el('button', { textContent: '1×', onclick() { speed = speed === 1 ? 0.5 : speed === 0.5 ? 0.25 : 1; video.playbackRate = speed; speedBtn.textContent = `${speed}×`; } });
+  const ctl = el('div', { className: 'ctl' }, el('button', { textContent: '−0.1s', ariaLabel: 'Back one frame', onclick: () => go(video.currentTime - 0.1) }),
+    el('button', { textContent: '+0.1s', ariaLabel: 'Forward one frame', onclick: () => go(video.currentTime + 0.1) }), speedBtn, time);
+  const tick = () => { time.textContent = `${fmt(video.currentTime)} / ${fmt(dur())}`; if (!scrubbing && dur()) seek.value = video.currentTime / dur() * 1000; pinBtn.textContent = pinned ? `At ${fmt(video.currentTime)}` : 'Whole clip'; };
+  seek.oninput = () => { scrubbing = true; video.pause(); if (dur()) video.currentTime = seek.value / 1000 * dur(); };
+  seek.onchange = () => { scrubbing = false; };
+  video.onclick = toggle;
+  video.onplay = () => { big.hidden = true; };
+  video.onpause = () => { big.hidden = false; big.textContent = '▶'; };
+  video.ontimeupdate = tick; video.onseeked = tick;
+  video.onloadedmetadata = () => { tick(); drawMarks(); };
+  video.onerror = () => say('This clip would not load', true);
+
+  const stars = el('div', { className: 'stars' }, ...[1, 2, 3, 4, 5].map(n => el('button', { textContent: '★', ariaLabel: `${n} stars`, onclick() { c.rating = c.rating === n ? 0 : n; paint(); post(name, file, { op: 'rate', rating: c.rating }); } })));
+  const verdict = el('div', { className: 'verdict' }, ...[['final', 'Final render'], ['fix', 'Fix first'], ['skip', 'Skip']].map(([v, label]) => {
+    const btn = el('button', { textContent: label, onclick() { c.verdict = c.verdict === v ? '' : v; paint(); post(name, file, { op: 'verdict', verdict: c.verdict }); } });
+    btn.dataset.v = v; return btn; }));
+  const paint = () => { [...stars.children].forEach((s, k) => s.classList.toggle('on', k < c.rating)); [...verdict.children].forEach(v => v.classList.toggle('on', v.dataset.v === c.verdict)); };
+
+  let pinned = true;
+  const box = el('textarea', { placeholder: 'What\'s wrong at this moment?', ariaLabel: 'Comment', onfocus: () => video.pause() });
+  const pinBtn = el('button', { className: 'pin on', textContent: 'At 0:00.0', onclick() { pinned = !pinned; pinBtn.classList.toggle('on', pinned); tick(); } });
+  const list = el('div');
+  const drawMarks = () => { marks.replaceChildren(...c.comments.filter(m => m.t != null && dur()).map(m => { const d = el('div', { className: 'mark' }); d.style.left = `${m.t / dur() * 100}%`; return d; })); };
+  const drawList = () => { list.replaceChildren(...c.comments.map(m => el('div', { className: 'c' },
+    el('button', { className: 'when', textContent: fmt(m.t), onclick() { if (m.t != null) go(m.t); } }),
+    el('div', { className: 'text', textContent: m.text }),
+    el('button', { className: 'x', textContent: '✕', ariaLabel: 'Delete comment', onclick() { c.comments = c.comments.filter(k => k.id !== m.id); post(name, file, { op: 'delete', id: m.id }); drawList(); drawMarks(); } })))); };
+  const send = el('button', { className: 'send grow', textContent: 'Add comment', onclick() {
+    const text = box.value.trim(); if (!text) return;
+    const m = { id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()), t: pinned ? +video.currentTime.toFixed(2) : null, text };
+    c.comments.push(m); c.comments.sort((a, b) => (a.t == null) - (b.t == null) || (a.t || 0) - (b.t || 0));
+    post(name, file, { op: 'comment', ...m }); box.value = ''; drawList(); drawMarks(); } });
+
+  app.replaceChildren(
+    el('div', { className: 'top' }, el('button', { textContent: '‹ All', onclick: () => location.hash = name }), el('div', { className: 'grow', textContent: c.title }), el('span', { className: 'tag none', textContent: `${i + 1}/${b.clips.length}` })),
+    el('div', { className: 'stage' }, video, big), bar, ctl, stars, verdict,
+    ...(c.note ? [el('div', { className: 'note', textContent: c.note })] : []),
+    box, el('div', { className: 'row', style: 'margin:8px 0' }, pinBtn, send), list,
+    ...(next ? [el('button', { textContent: `Next: ${next.title} ›`, style: 'width:100%;margin-top:14px', onclick: () => location.hash = `${name}/${enc(next.file)}` })] : []));
+  paint(); drawList(); tick();
+}
+function route() {
+  const [name, file] = location.hash.slice(1).split('/');
+  (file ? clip(name, decodeURIComponent(file)) : name ? batch(decodeURIComponent(name)) : home()).catch(() => say('Could not load. Check your connection', true));
+  window.scrollTo(0, 0);
+}
+addEventListener('hashchange', route); addEventListener('online', flush);
+route(); flush();
+</script>
+</body>
+</html>

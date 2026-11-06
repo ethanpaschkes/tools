@@ -16,6 +16,7 @@ projects and kept here so they can be found and reused instead of rebuilt.
 | [video-helpers](video-helpers) | macOS: grab a frame, phone bezel around a recording, side-by-side, no ffmpeg |
 | [screenshot-frame](screenshot-frame) | iPhone body around iOS Simulator screenshots |
 | [glb-tools](glb-tools) | recentre / recolour GLB 3D models without Blender |
+| [video-review](video-review) | watch clips on a phone, rate them, and comment at the exact moment; read it all back later |
 
 Get one tool without cloning everything:
 
