@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Photo drop">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f1318">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="manifest.json">
+<title>Photo drop</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; background: #0f1318; color: #f2f5f8;
+    font: 17px/1.35 -apple-system, system-ui, sans-serif;
+    padding: calc(env(safe-area-inset-top) + 14px) 16px calc(env(safe-area-inset-bottom) + 24px);
+  }
+  h1 { font-size: 22px; margin: 0; }
+  header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+  #link { font-size: 14px; color: #8a96a3; }
+  #link.ok { color: #4cd3a0; }
+  #link.bad { color: #ff7b72; }
+  #note {
+    width: 100%; font: inherit; color: inherit; background: #1a212a; border: 1px solid #2b3642;
+    border-radius: 12px; padding: 12px 14px; margin-bottom: 14px;
+  }
+  .row { display: flex; gap: 10px; margin-bottom: 10px; }
+  .row label {
+    position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center;
+    min-height: 84px; border-radius: 16px; font-weight: 600; user-select: none; -webkit-user-select: none;
+  }
+  .row label:active { filter: brightness(1.25); }
+  .row input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .shoot { flex: 1; background: #1f6feb; font-size: 24px; gap: 12px; }
+  .shoot svg { width: 30px; height: 30px; fill: currentColor; }
+  .pick { width: 92px; background: #1a212a; border: 1px solid #2b3642; font-size: 15px; color: #c3ccd6; }
+  #recent { margin-top: 18px; display: grid; gap: 10px; }
+  .item {
+    display: flex; align-items: center; gap: 12px; background: #161c24; border-radius: 14px; padding: 8px;
+    border: 1px solid #232c37;
+  }
+  .item img { width: 72px; height: 72px; object-fit: cover; border-radius: 10px; background: #0b0e12; }
+  .item .text { flex: 1; min-width: 0; }
+  .item .state { font-weight: 600; }
+  .item .detail { font-size: 14px; color: #8a96a3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item.sent { border-color: #1f5c47; }
+  .item.sent .state { color: #4cd3a0; }
+  .item.failed { border-color: #6e2b2b; }
+  .item.failed .state { color: #ff7b72; }
+  .item button {
+    font: inherit; font-weight: 600; color: #fff; background: #b93a32; border: 0; border-radius: 10px; padding: 10px 14px;
+  }
+</style>
+</head>
+<body>
+<header><h1>Photo drop</h1><span id="link">Connecting…</span></header>
+<input id="note" type="text" maxlength="500" enterkeyhint="done" autocomplete="off"
+       placeholder="Note for the next photo (optional)">
+<div id="dests"></div>
+<div id="recent"></div>
+<script>
+const MAX_EDGE = 2500;
+const MAX_BYTES = 40 * 1024 * 1024;
+const CAMERA_ICON = '<svg viewBox="0 0 24 24"><path d="M9 3 7.2 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9zm3 5.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9z"/></svg>';
+const byId = id => document.getElementById(id);
+let shownDests = "";
+let sending = Promise.resolve();
+
+function setLink(text, state) {
+  byId("link").textContent = text;
+  byId("link").className = state;
+}
+
+async function loadDests() {
+  try {
+    const response = await fetch("dests", { cache: "no-store" });
+    if (!response.ok) throw new Error(response.status);
+    showDests(await response.json());
+    setLink("Mac connected", "ok");
+  } catch (error) {
+    setLink("Mac not reachable", "bad");
+  }
+}
+
+function showDests(names) {
+  if (names.join() === shownDests) return;
+  shownDests = names.join();
+  byId("dests").replaceChildren(...names.map(name => {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.append(pickerButton(name, true), pickerButton(name, false));
+    return row;
+  }));
+}
+
+function pickerButton(dest, camera) {
+  const label = document.createElement("label");
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+  if (camera) {
+    input.capture = "environment";
+    label.className = "shoot";
+    label.innerHTML = CAMERA_ICON;
+    label.append(dest);
+  } else {
+    input.multiple = true;
+    label.className = "pick";
+    label.append("Library");
+  }
+  input.addEventListener("change", () => {
+    const note = byId("note").value.trim();
+    byId("note").value = "";
+    for (const file of input.files) queue(dest, file, note);
+    input.value = "";
+  });
+  label.append(input);
+  return label;
+}
+
+async function shrink(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    const scale = Math.min(1, MAX_EDGE / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(image.naturalWidth * scale);
+    canvas.height = Math.round(image.naturalHeight * scale);
+    canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.9));
+    return blob || file;
+  } catch (error) {
+    return file;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function queue(dest, file, note) {
+  const item = document.createElement("div");
+  item.className = "item";
+  item.innerHTML = '<img alt=""><div class="text"><div class="state"></div><div class="detail"></div></div>';
+  byId("recent").prepend(item);
+  const show = (kind, state, detail) => {
+    item.className = "item " + kind;
+    item.querySelector(".state").textContent = state;
+    item.querySelector(".detail").textContent = detail;
+  };
+  show("", "Waiting…", dest);
+  let photo;
+  const attempt = async () => {
+    item.querySelector("button")?.remove();
+    show("", "Sending…", dest);
+    try {
+      if (!photo) {
+        photo = await shrink(file);
+        item.querySelector("img").src = URL.createObjectURL(photo);
+      }
+      const name = await upload(dest, photo, note);
+      show("sent", "Sent to " + dest, name + (note ? " · " + note : ""));
+    } catch (error) {
+      show("failed", "Not sent", error.message);
+      const retry = document.createElement("button");
+      retry.textContent = "Retry";
+      retry.onclick = () => { sending = sending.then(attempt); };
+      item.append(retry);
+    }
+  };
+  sending = sending.then(attempt);
+}
+
+async function upload(dest, photo, note) {
+  if (photo.size > MAX_BYTES) throw new Error("This photo is too big.");
+  let response;
+  try {
+    response = await fetch("upload?dest=" + encodeURIComponent(dest), {
+      method: "POST",
+      headers: { "Content-Type": photo.type || "application/octet-stream", "X-Photo-Note": encodeURIComponent(note) },
+      body: photo,
+      signal: AbortSignal.timeout(60000),
+    });
+  } catch (error) {
+    setLink("Mac not reachable", "bad");
+    throw new Error("Can't reach the Mac. Is it awake and on the same Wi-Fi?");
+  }
+  setLink("Mac connected", "ok");
+  if (response.ok) return (await response.json()).name;
+  const reasons = { 400: "That destination is gone.", 404: "The Mac did not accept this link.",
+                    413: "This photo is too big.", 415: "The Mac could not read this as a photo." };
+  throw new Error(reasons[response.status] || "The Mac answered with error " + response.status + ".");
+}
+
+document.addEventListener("visibilitychange", () => { if (!document.hidden) loadDests(); });
+loadDests();
+</script>
+</body>
+</html>

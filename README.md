@@ -17,6 +17,7 @@ projects and kept here so they can be found and reused instead of rebuilt.
 | [screenshot-frame](screenshot-frame) | iPhone body around iOS Simulator screenshots |
 | [glb-tools](glb-tools) | recentre / recolour GLB 3D models without Blender |
 | [video-review](video-review) | watch clips on a phone, rate them, and comment at the exact moment; read it all back later |
+| [photo-drop](photo-drop) | send photos from an iPhone straight into a folder on your Mac, skipping AirDrop and the camera roll |
 
 Get one tool without cloning everything:
 
